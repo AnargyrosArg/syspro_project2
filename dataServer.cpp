@@ -54,14 +54,11 @@ int main(void){
     //initialize conditions
     pthread_cond_init(&queue_not_empty,NULL);
     pthread_cond_init(&queue_not_full,NULL);
-    
-
-    //TODO test if this needs to be here or in the begging of workerthread fucntions
-    if(pthread_mutex_lock(&queue_not_empty_lock)){
-        cout << "Error locking queue not empty mutex"<<endl;
-        exit(-1);
-    }
-
+      //initial lock to not empty mutex so workers pause when created
+        if(pthread_mutex_lock(&queue_not_empty_lock)){
+            cout << "Error locking queue not empty mutex"<<endl;
+            exit(-1);
+        }
 
     //create worker threads
     pthread_t workers[workerCount];
@@ -143,35 +140,45 @@ void* CommunicationThreadFunct(void* arg){
     //done using the socket - unlock
     pthread_mutex_unlock(&client->client_lock);
     for(int i=0;i<filenames.size();i++){
-        //TODO if queue full block here
+        File file;
+        file.client=*client;
+        file.path=filenames.at(i);
 
         //for every file read we push in queue and signal not empty
         if(pthread_mutex_lock(&queue_not_empty_lock)){
             cout << "Error locking queue not empty lock in communication thread"<<endl;
             exit(-1);
         }
-        File file;
-        file.client=*client;
-        file.path=filenames.at(i);
-        //generic lock here so that size is consistent between threads
-        if(pthread_mutex_lock(&GeneralQueueLock)){
-            cout << "Error locking general queue lock in communication thread"<<endl;
-            exit(-1);
-        }
-        FileQueue.push(file);
-        pthread_mutex_unlock(&GeneralQueueLock);
+
+
+
         //TODO if full -> wait for not full signal
         if(pthread_mutex_lock(&queue_not_full_lock)){
             cout << "Error locking queue not full lock in communication thread"<<endl;
             exit(-1);
         }
-        while(FileQueue.size()==QueueSize){
+        while(FileQueue.size()>=QueueSize){
             pthread_cond_wait(&queue_not_full,&queue_not_full_lock);
         }
-        pthread_mutex_unlock(&queue_not_full_lock);
+        
+        
+        //generic lock here to avoid race condition on the Queue
+         if(pthread_mutex_lock(&GeneralQueueLock)){
+            cout << "Error locking general queue lock in communication thread"<<endl;
+            exit(-1);
+        }
+        FileQueue.push(file);
         cout <<"[C-"<<pthread_self()<<"] Added "<<filenames.at(i)<<" to the queue."<<endl;
-        pthread_cond_signal(&queue_not_empty);
+        cout << "Current queue size: "<< FileQueue.size() << endl;
+        pthread_mutex_unlock(&GeneralQueueLock);    
+        
+        pthread_cond_broadcast(&queue_not_empty);
+        
+        pthread_mutex_unlock(&queue_not_full_lock);
         pthread_mutex_unlock(&queue_not_empty_lock);
+
+
+        
     }
     pthread_exit(0);
     return NULL;
@@ -213,28 +220,36 @@ vector<string> SearchDirectory(string path){
 
 void* WorkerThreadFunct(void* arg){
     while(true){
-        
+         
         while(FileQueue.empty()){
             pthread_cond_wait(&queue_not_empty,&queue_not_empty_lock);
-        }
-        if(pthread_mutex_lock(&GeneralQueueLock)){
-            cout << "Error locking General queue mutex"<<endl;
-            exit(-1);
         }
         if(pthread_mutex_lock(&queue_not_full_lock)){
             cout << "Error locking not full queue mutex"<<endl;
             exit(-1);
         }
+        if(pthread_mutex_lock(&GeneralQueueLock)){
+            cout << "Error locking General queue mutex"<<endl;
+            exit(-1);
+        }
         File file =  FileQueue.pop();
-        pthread_mutex_unlock(&GeneralQueueLock);
         cout << "[W-"<<pthread_self()<<"] Working on "<<file.path<<endl;
-        pthread_cond_signal(&queue_not_full);
+        pthread_mutex_unlock(&GeneralQueueLock);
+        pthread_cond_broadcast(&queue_not_full);
         pthread_mutex_unlock(&queue_not_full_lock);
+
+
         pthread_mutex_unlock(&queue_not_empty_lock);
+        
+
+
+
+        //lock client mutex
+        pthread_mutex_lock(&file.client.client_lock);
         //TODO remove sleep
         sleep(1);
-        //lock client mutex
         //send file
         //unlock client mutex
+        pthread_mutex_unlock(&file.client.client_lock);
     }
 }

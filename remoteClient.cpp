@@ -42,7 +42,7 @@ int main(void){
         perror("connect: ");
         exit(-1);
     }
-    char test[] ="./";
+    char test[] ="output";
     write(sock,test,sizeof(test));
     cout << "wrote " << test << " in socket "<<endl;
 }
