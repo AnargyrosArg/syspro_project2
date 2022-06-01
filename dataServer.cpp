@@ -9,26 +9,36 @@
 #include <unistd.h>
 #include <dirent.h>
 #include "MyQueue.h"
+#include <fcntl.h>
+#include <stdlib.h>
 #include <set>
 
-#define BUFSIZE 128
+
+//maximum length of initial path size the client can request
+#define PATHSIZE 256
 using namespace std;
+
+
+
 
 struct Client
 {
     int sock;
     pthread_mutex_t client_lock;
+    int remaining_files;
 };
 
 struct File
 {
     string path;
-    Client client;
+    Client* client;
 };
+
+
 void* WorkerThreadFunct(void* arg);
 void* CommunicationThreadFunct(void* arg);
 vector<string> SearchDirectory(string path);
-
+void sendFile(string path,int socket);
 
 
 Queue<File> FileQueue = Queue<File>();
@@ -45,11 +55,14 @@ static pthread_mutex_t dir_read = PTHREAD_MUTEX_INITIALIZER;
 
 
 int QueueSize;
+int block_size;
+
 
 int main(void){
     int port = 12501;
     int workerCount = 3;
     QueueSize = 10;
+    block_size = 512;
 
     //initialize conditions
     pthread_cond_init(&queue_not_empty,NULL);
@@ -122,10 +135,12 @@ void* CommunicationThreadFunct(void* arg){
     string path = "";
     //exclusive use of client socket
     pthread_mutex_lock(&client->client_lock);
-    char buf[BUFSIZE];
+    char buf[PATHSIZE];
     int n_read;
     //TODO read path    
-    while((n_read=read(client->sock,buf,BUFSIZE))>0){
+    int total_read=0;
+    while((n_read=read(client->sock,buf,PATHSIZE-total_read))>0){
+        total_read = total_read + n_read;
         path.append(buf);
     }
     if(path.at(path.size()-1)=='/'){
@@ -137,11 +152,15 @@ void* CommunicationThreadFunct(void* arg){
     pthread_mutex_lock(&dir_read);
     filenames = SearchDirectory(path);
     pthread_mutex_unlock(&dir_read);
+
+    client->remaining_files = filenames.size();
+    
+    
     //done using the socket - unlock
     pthread_mutex_unlock(&client->client_lock);
     for(int i=0;i<filenames.size();i++){
         File file;
-        file.client=*client;
+        file.client=client;
         file.path=filenames.at(i);
 
         //for every file read we push in queue and signal not empty
@@ -149,8 +168,6 @@ void* CommunicationThreadFunct(void* arg){
             cout << "Error locking queue not empty lock in communication thread"<<endl;
             exit(-1);
         }
-
-
 
         //TODO if full -> wait for not full signal
         if(pthread_mutex_lock(&queue_not_full_lock)){
@@ -173,7 +190,6 @@ void* CommunicationThreadFunct(void* arg){
         pthread_mutex_unlock(&GeneralQueueLock);    
         
         pthread_cond_broadcast(&queue_not_empty);
-        
         pthread_mutex_unlock(&queue_not_full_lock);
         pthread_mutex_unlock(&queue_not_empty_lock);
 
@@ -234,22 +250,75 @@ void* WorkerThreadFunct(void* arg){
         }
         File file =  FileQueue.pop();
         cout << "[W-"<<pthread_self()<<"] Working on "<<file.path<<endl;
+        cout << "Current size: " << FileQueue.size() << endl;
         pthread_mutex_unlock(&GeneralQueueLock);
+
         pthread_cond_broadcast(&queue_not_full);
+
         pthread_mutex_unlock(&queue_not_full_lock);
-
-
         pthread_mutex_unlock(&queue_not_empty_lock);
         
 
 
 
         //lock client mutex
-        pthread_mutex_lock(&file.client.client_lock);
+        pthread_mutex_lock(&file.client->client_lock);
         //TODO remove sleep
-        sleep(1);
         //send file
+        sendFile(file.path,file.client->sock);
+        
+        //if the client has recieved all files requested 
+        //we can close the socket
+        file.client->remaining_files--;
+        if(file.client->remaining_files==0){
+            cout << "Client in socket "<< file.client->sock << " done!"<<endl;
+            close(file.client->sock);
+        }
+
         //unlock client mutex
-        pthread_mutex_unlock(&file.client.client_lock);
+        pthread_mutex_unlock(&file.client->client_lock);
     }
 }
+
+
+
+
+void sendFile(string path,int socket){
+    int file_desc;
+    int file_size;
+
+    cout << "attempting to send file " << path << endl;
+    char buf[block_size];
+    file_desc = open(path.c_str(),O_RDONLY);
+    if(file_desc==-1){
+        perror("fopen: ");
+        exit(-1);
+    }
+    file_size = lseek(file_desc,SEEK_SET,SEEK_END);
+    lseek(file_desc,SEEK_SET,0);
+    
+    cout << "size: " << file_size<<endl;
+    int total = 0;
+    int nread = 0;
+    int nwrite = 0;
+    int blocktotal = 0;
+    string data ="";
+
+
+    while(total<file_size){
+        cout << "total sent: " << total << endl;
+        while((nread=read(file_desc,buf,block_size-blocktotal))>0){
+            total = total + nread;
+            blocktotal= blocktotal + nread;
+            data.append(buf);
+            cout << "blocktotal: " << blocktotal << endl;
+            
+        }
+        data.append("\0");
+        nwrite=write(socket,data.c_str(),blocktotal);
+        cout << "Wrote "<< data.c_str() << "size: " << nwrite <<endl;
+        blocktotal = 0;            
+    }
+    
+    close(file_desc);
+}   

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#define PATHSIZE 256
 
 using namespace std;
 
@@ -42,7 +43,20 @@ int main(void){
         perror("connect: ");
         exit(-1);
     }
-    char test[] ="output";
+    char test[PATHSIZE] = "inputsad";
     write(sock,test,sizeof(test));
     cout << "wrote " << test << " in socket "<<endl;
+    read(sock,test,sizeof(test));
+ 
+
+
+
+    int nread;
+    char buf[1];
+    string data;
+    while((nread=read(sock,buf,1))>0){
+        data.append(buf);
+        cout << data << endl;  
+    }
+    cout << data << endl;
 }
