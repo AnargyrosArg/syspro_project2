@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <string>
+#include <string.h>
 #include <unistd.h>
 #include <dirent.h>
 #include "MyQueue.h"
@@ -13,9 +14,9 @@
 #include <stdlib.h>
 #include <set>
 
-
+#include "CommonVariables.h"
 //maximum length of initial path size the client can request
-#define PATHSIZE 256
+
 using namespace std;
 
 
@@ -60,7 +61,7 @@ int block_size;
 
 int main(void){
     int port = 12501;
-    int workerCount = 3;
+    int workerCount = 1;
     QueueSize = 10;
     block_size = 512;
 
@@ -209,6 +210,7 @@ vector<string> SearchDirectory(string path){
     //open directory
     if((dir = opendir(path.c_str()))==NULL){
         cout << "Couldn't open given directory: " << path <<endl;
+
         pthread_exit(0);
     }  
     //read everything
@@ -221,7 +223,7 @@ vector<string> SearchDirectory(string path){
             if(contents->d_type == DT_DIR){
                 newpath.append("/"+filename);
                 vector<string> temp = SearchDirectory(newpath);
-                filenames.push_back(newpath+"/");
+              //  filenames.push_back(newpath+"/");
                 filenames.insert(filenames.end() , temp.begin(),temp.end()); 
             }else{
             //else just store the name of the file
@@ -263,10 +265,8 @@ void* WorkerThreadFunct(void* arg){
 
         //lock client mutex
         pthread_mutex_lock(&file.client->client_lock);
-        //TODO remove sleep
         //send file
         sendFile(file.path,file.client->sock);
-        
         //if the client has recieved all files requested 
         //we can close the socket
         file.client->remaining_files--;
@@ -274,7 +274,6 @@ void* WorkerThreadFunct(void* arg){
             cout << "Client in socket "<< file.client->sock << " done!"<<endl;
             close(file.client->sock);
         }
-
         //unlock client mutex
         pthread_mutex_unlock(&file.client->client_lock);
     }
@@ -287,7 +286,6 @@ void sendFile(string path,int socket){
     int file_desc;
     int file_size;
 
-    cout << "attempting to send file " << path << endl;
     char buf[block_size];
     file_desc = open(path.c_str(),O_RDONLY);
     if(file_desc==-1){
@@ -297,26 +295,26 @@ void sendFile(string path,int socket){
     file_size = lseek(file_desc,SEEK_SET,SEEK_END);
     lseek(file_desc,SEEK_SET,0);
     
-    cout << "size: " << file_size<<endl;
     int total = 0;
     int nread = 0;
     int nwrite = 0;
     int blocktotal = 0;
     string data ="";
+    char metadata[METADATASIZE];
+    strcpy(metadata,(path+" "+to_string(file_size)).c_str());
+    
+    //maybe while loop here
+    write(socket,metadata,METADATASIZE);
 
 
     while(total<file_size){
-        cout << "total sent: " << total << endl;
         while((nread=read(file_desc,buf,block_size-blocktotal))>0){
             total = total + nread;
             blocktotal= blocktotal + nread;
             data.append(buf);
-            cout << "blocktotal: " << blocktotal << endl;
-            
         }
-        data.append("\0");
+        data.at(blocktotal) ='\0';
         nwrite=write(socket,data.c_str(),blocktotal);
-        cout << "Wrote "<< data.c_str() << "size: " << nwrite <<endl;
         blocktotal = 0;            
     }
     

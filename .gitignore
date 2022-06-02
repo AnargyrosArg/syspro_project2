@@ -8,3 +8,5 @@ output/test1
 .vscode/dryrun.log
 remoteClient
 dataServer
+input
+output
