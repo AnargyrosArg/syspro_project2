@@ -93,11 +93,13 @@ int main(int argc , char** argv){
     //initialize conditions
     pthread_cond_init(&queue_not_empty,NULL);
     pthread_cond_init(&queue_not_full,NULL);
-      //initial lock to not empty mutex so workers pause when created
-        if(pthread_mutex_lock(&queue_not_empty_lock)){
-            cout << "Error locking queue not empty mutex"<<endl;
-            exit(-1);
-        }
+   
+   
+    //   //initial lock to not empty mutex so workers pause when created
+    //     if(pthread_mutex_lock(&queue_not_empty_lock)){
+    //         cout << "Error locking queue not empty mutex"<<endl;
+    //         exit(-1);
+    //     }
 
     //create worker threads
     pthread_t workers[workerCount];
@@ -265,6 +267,12 @@ vector<string> SearchDirectory(string path){
 void* WorkerThreadFunct(void* arg){
     while(true){
         
+        if(pthread_mutex_lock(&queue_not_empty_lock)){
+            cout << "Error locking not full queue mutex"<<endl;
+            exit(-1);
+        }
+
+
         while(FileQueue.empty()){
             pthread_cond_wait(&queue_not_empty,&queue_not_empty_lock);
         }

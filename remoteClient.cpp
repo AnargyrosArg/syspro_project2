@@ -95,7 +95,7 @@ int main(int argc,char** argv){
         if(total_meta==METADATASIZE){
             //decode metadata , read exactly size bytes, repeat 
             total_meta=0;
-         //   cout << "Meta:" << metadata<<endl;
+            //cout << "Meta:" << metadata<<endl;
             int delim_pos = metadata.rfind(" ");
             int filesize = atoi( metadata.substr(delim_pos+1).c_str());
             string path = metadata.substr(0,delim_pos);
@@ -146,12 +146,7 @@ void createDirectories(string path){
        // cout << "trying to create " << path.substr(0,end).c_str() << endl;
         mkdir( path.substr(0,end).c_str() ,0777);
     }
-
-
 }
-
-
-
 
 
 string sanitizePath(string path){
