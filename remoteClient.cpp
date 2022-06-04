@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "utils.h"
 #include "CommonVariables.h"
 
 #define BUFFERSIZE 32
@@ -22,18 +23,44 @@ using namespace std;
 
 void createFile(string path , int filesize, int sock);
 void createDirectories(string path);
-int main(void){
+string sanitizePath(string path);
+
+int main(int argc,char** argv){
     
 
     hostent *rem;
-
+    string hostname;
+    string path ;
     int port = 12501;
     int sock;
     sockaddr_in server;
     sockaddr *serverptr = (sockaddr*)&server;
+    if(argc != 7){
+        cout << "Usage: ./remoteClient -i <server_ip> -p <server_port> -d <directory>"<<endl;
+        exit(-1);
+    }
+    for(int i=1;i<argc;i=i+2){
+        if(!strcmp(argv[i],"-p")){
+            port = atoi(argv[i+1]);
+        }else if(!strcmp(argv[i],"-d")){
+            path = argv[i+1];
+        }
+        else if(!strcmp(argv[i],"-i")){
+            hostname = argv[i+1];
+        }
+        else{
+            cout << "Usage: ./remoteClient -i <server_ip> -p <server_port> -d <directory>"<<endl;
+            exit(-1);
+        }
+    }
 
-    if((rem = gethostbyname("localhost"))==NULL){
-        perror("gethostbyname: ");
+    rem = gethostbyname(hostname.c_str());
+
+
+
+
+    if(rem==NULL){
+        cout << "gethostbyname: " << hstrerror(h_errno) << endl;
         exit(-1);
     }        
 
@@ -50,16 +77,13 @@ int main(void){
         exit(-1);
     }
     
-    string path = "input";
-
+    
+    //maybe while loop here
     write(sock,path.c_str(),PATHSIZE);
 
  
-    int nread=0;
-    int totalread=0;
     int nread_meta=0;
     int total_meta=0;
-    char buf[1];
     char meta[METADATASIZE+1];
     string data;
     string metadata;
@@ -71,12 +95,12 @@ int main(void){
         if(total_meta==METADATASIZE){
             //decode metadata , read exactly size bytes, repeat 
             total_meta=0;
-            cout << "Meta:" << metadata<<endl;
+         //   cout << "Meta:" << metadata<<endl;
             int delim_pos = metadata.rfind(" ");
             int filesize = atoi( metadata.substr(delim_pos+1).c_str());
             string path = metadata.substr(0,delim_pos);
-            cout << "filesize "<<filesize<<endl;
             cout << "path " << path <<endl;
+            cout << "filesize "<<filesize<<endl;
             createFile(path,filesize,sock);
             metadata.clear();
             path.clear();
@@ -88,6 +112,7 @@ int main(void){
 
 void createFile(string path , int filesize , int sock){
     int file_des;
+    path = sanitizePath(path);
     path.insert(0,OUTPATH);
     createDirectories(path);
     file_des = open(path.c_str(),O_CREAT | O_RDWR,0777);
@@ -97,14 +122,14 @@ void createFile(string path , int filesize , int sock){
     }
     cout << "Opened: " << path << endl;
     int total_read=0;
-    int current_read=0;
     int nread=0;
     
     char buf[1];
     while(total_read<filesize){
         nread=read(sock,buf,1);
+      //  cout << buf << endl;
         total_read = total_read + nread;
-        cout << "Wrote: " << buf[0] << " counter: "<< total_read <<endl;
+        //send blocksize and read exactly that?
         write(file_des,buf,1);
     }
 }
@@ -113,15 +138,34 @@ void createFile(string path , int filesize , int sock){
 void createDirectories(string path){
     int start;
     int end=0;
-
     while((start = path.find_first_not_of('/',end))!= string::npos){
         end = path.find('/',start);
         if(end == string::npos){
             return;
         }
-        cout << "trying to create " << path.substr(0,end).c_str() << endl;
+       // cout << "trying to create " << path.substr(0,end).c_str() << endl;
         mkdir( path.substr(0,end).c_str() ,0777);
     }
 
 
+}
+
+
+
+
+
+string sanitizePath(string path){
+    int pos ;
+    string output = path;
+  //  cout << path << endl;
+    while( ( pos = output.find("../") !=string::npos)){
+        output = output.substr(pos+2);
+    //    cout << pos << endl;
+       // cout<<"-" << output << endl;
+    }
+    while((pos = output.find("./"))!=string::npos){
+     //   output = output.substr(pos+1);
+     //   cout<<"-" << output << endl;
+    }
+    return output;
 }

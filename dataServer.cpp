@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <set>
 
+
+#include "utils.h"
 #include "CommonVariables.h"
 //maximum length of initial path size the client can request
 
@@ -25,7 +27,7 @@ using namespace std;
 struct Client
 {
     int sock;
-    pthread_mutex_t client_lock;
+    pthread_mutex_t* client_lock;
     int remaining_files;
 };
 
@@ -59,11 +61,34 @@ int QueueSize;
 int block_size;
 
 
-int main(void){
+int main(int argc , char** argv){
+    if(argc!=9){
+        cout << "Usage: ./dataServer -p <port> -s <thread_pool_size> -q <queue_size> -b <block_size>"<<endl;
+        exit(-1);
+    }
     int port = 12501;
-    int workerCount = 1;
+    int workerCount = 5;
     QueueSize = 10;
-    block_size = 512;
+    block_size = 16;
+    for(int i=1;i<argc;i=i+2){
+        if(!strcmp(argv[i],"-p")){
+            port = atoi(argv[i+1]);
+        }else if(!strcmp(argv[i],"-s")){
+            workerCount = atoi(argv[i+1]);
+        }
+        else if(!strcmp(argv[i],"-q")){
+            QueueSize = atoi(argv[i+1]);
+        }
+        else if(!strcmp(argv[i],"-b")){
+            block_size = atoi(argv[i+1]);
+        }else{
+            cout << "Usage: ./dataServer -p <port> -s <thread_pool_size> -q <queue_size> -b <block_size>"<<endl;
+            exit(-1);
+        }
+    }
+
+
+
 
     //initialize conditions
     pthread_cond_init(&queue_not_empty,NULL);
@@ -113,8 +138,9 @@ int main(void){
         //build a new client
         pthread_t communication_thread;
         Client *newClient = new Client;
+        newClient->client_lock =(pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
         newClient->sock=newSocket;
-        pthread_mutex_init(&(newClient->client_lock),NULL);
+        pthread_mutex_init(newClient->client_lock,NULL);
         //create a new communication thread
         if(pthread_create(&communication_thread,NULL,CommunicationThreadFunct,newClient)){
             cout << "Error creating new communication thread."<<endl;
@@ -135,7 +161,7 @@ void* CommunicationThreadFunct(void* arg){
     vector<string> filenames;
     string path = "";
     //exclusive use of client socket
-    pthread_mutex_lock(&client->client_lock);
+    pthread_mutex_lock(client->client_lock);
     char buf[PATHSIZE];
     int n_read;
     //TODO read path    
@@ -158,7 +184,7 @@ void* CommunicationThreadFunct(void* arg){
     
     
     //done using the socket - unlock
-    pthread_mutex_unlock(&client->client_lock);
+    pthread_mutex_unlock(client->client_lock);
     for(int i=0;i<filenames.size();i++){
         File file;
         file.client=client;
@@ -238,7 +264,7 @@ vector<string> SearchDirectory(string path){
 
 void* WorkerThreadFunct(void* arg){
     while(true){
-         
+        
         while(FileQueue.empty()){
             pthread_cond_wait(&queue_not_empty,&queue_not_empty_lock);
         }
@@ -254,7 +280,6 @@ void* WorkerThreadFunct(void* arg){
         cout << "[W-"<<pthread_self()<<"] Working on "<<file.path<<endl;
         cout << "Current size: " << FileQueue.size() << endl;
         pthread_mutex_unlock(&GeneralQueueLock);
-
         pthread_cond_broadcast(&queue_not_full);
 
         pthread_mutex_unlock(&queue_not_full_lock);
@@ -264,7 +289,10 @@ void* WorkerThreadFunct(void* arg){
 
 
         //lock client mutex
-        pthread_mutex_lock(&file.client->client_lock);
+        pthread_mutex_lock(file.client->client_lock);
+        cout << "Locked client with socket " << file.client->sock << endl;
+        cout << "Locked " << file.client->client_lock << endl;
+
         //send file
         sendFile(file.path,file.client->sock);
         //if the client has recieved all files requested 
@@ -275,7 +303,10 @@ void* WorkerThreadFunct(void* arg){
             close(file.client->sock);
         }
         //unlock client mutex
-        pthread_mutex_unlock(&file.client->client_lock);
+        cout << "Unlocked client with socket " << file.client->sock << endl;
+        cout << "Unlocked " << file.client->client_lock << endl;
+
+        pthread_mutex_unlock(file.client->client_lock);
     }
 }
 
@@ -297,7 +328,7 @@ void sendFile(string path,int socket){
     
     int total = 0;
     int nread = 0;
-    int nwrite = 0;
+    int nwrite;
     int blocktotal = 0;
     string data ="";
     char metadata[METADATASIZE];
@@ -313,8 +344,9 @@ void sendFile(string path,int socket){
             blocktotal= blocktotal + nread;
             data.append(buf);
         }
-        data.at(blocktotal) ='\0';
+        //while loop here
         nwrite=write(socket,data.c_str(),blocktotal);
+        data.clear();
         blocktotal = 0;            
     }
     
