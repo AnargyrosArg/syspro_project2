@@ -21,7 +21,7 @@
 
 using namespace std;
 
-void createFile(string path , int filesize, int sock);
+void createFile(string path , int filesize, int sock,int block_size);
 void createDirectories(string path);
 string sanitizePath(string path);
 
@@ -95,13 +95,18 @@ int main(int argc,char** argv){
         if(total_meta==METADATASIZE){
             //decode metadata , read exactly size bytes, repeat 
             total_meta=0;
-            //cout << "Meta:" << metadata<<endl;
+           // cout << "Meta:" << metadata<<endl;
             int delim_pos = metadata.rfind(" ");
-            int filesize = atoi( metadata.substr(delim_pos+1).c_str());
+            int block_size = atoi(metadata.substr(delim_pos+1).c_str());
+            metadata = metadata.substr(0,delim_pos);
+            delim_pos = metadata.rfind(" ");
+            int filesize = atoi(metadata.substr(delim_pos+1).c_str());
             string path = metadata.substr(0,delim_pos);
-            cout << "path " << path <<endl;
-            cout << "filesize "<<filesize<<endl;
-            createFile(path,filesize,sock);
+            // cout << "path " << path <<endl;
+            // cout << "filesize "<<filesize<<endl;
+            // cout << "block_size " << block_size << endl;
+            createFile(path,filesize,sock,block_size);
+            sleep(1);
             metadata.clear();
             path.clear();
         }        
@@ -110,7 +115,7 @@ int main(int argc,char** argv){
 
 
 
-void createFile(string path , int filesize , int sock){
+void createFile(string path , int filesize , int sock,int block_size){
     int file_des;
     path = sanitizePath(path);
     path.insert(0,OUTPATH);
@@ -122,13 +127,17 @@ void createFile(string path , int filesize , int sock){
     }
     cout << "Opened: " << path << endl;
     int total_read=0;
+    int block_total=0;
     int nread=0;
-    char buf[2];
+    char buf[block_size+1];
     while(total_read<filesize){
-        nread=read(sock,buf,1);
-        total_read = total_read + nread;
-        //send blocksize and read exactly that?
-        write(file_des,buf,1);
+        block_total = 0;
+        while((nread=read(sock,buf,min(block_size-block_total,(filesize-total_read))))>0){
+            block_total+=nread;
+        }
+        buf[block_total]='\0';
+        total_read = total_read + block_total;
+        write_exactly(file_des,buf,block_total);
     }
 }
 

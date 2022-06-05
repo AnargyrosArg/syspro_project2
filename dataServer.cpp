@@ -302,7 +302,7 @@ void sendFile(string path,int socket){
     int file_desc;
     int file_size;
 
-    char buf[block_size];
+    
     file_desc = open(path.c_str(),O_RDONLY);
     if(file_desc==-1){
         perror("fopen: ");
@@ -316,23 +316,20 @@ void sendFile(string path,int socket){
     int nwrite;
     int blocktotal = 0;
     string data ="";
-    char metadata[METADATASIZE];
-    strcpy(metadata,(path+" "+to_string(file_size)).c_str());
-    
-    //maybe while loop here
+    char metadata[METADATASIZE+1];
+    strcpy(metadata,(path+" "+to_string(file_size)+" "+to_string(block_size)).c_str());
+    char buf[block_size+1];
     write_exactly(socket,metadata,METADATASIZE);
-
-
     while(total<file_size){
         while((nread=read(file_desc,buf,block_size-blocktotal))>0){
+            buf[nread]='\0';
             total = total + nread;
             blocktotal= blocktotal + nread;
             data.append(buf);
         }
-        //while loop here
         nwrite=write_exactly(socket,data.c_str(),blocktotal);
         data.clear();
-        blocktotal = 0;            
+        blocktotal = 0;
     }
     
     close(file_desc);
