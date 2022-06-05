@@ -47,9 +47,8 @@ void sendFile(string path,int socket);
 Queue<File> FileQueue = Queue<File>();
 static pthread_mutex_t GeneralQueueLock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  queue_not_empty;
-static pthread_mutex_t queue_not_empty_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t cond_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  queue_not_full;
-static pthread_mutex_t queue_not_full_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 //mutex for locking directories, since readdir_r is deprecated and i dont want to use it
@@ -95,12 +94,6 @@ int main(int argc , char** argv){
     pthread_cond_init(&queue_not_full,NULL);
    
    
-    //   //initial lock to not empty mutex so workers pause when created
-    //     if(pthread_mutex_lock(&queue_not_empty_lock)){
-    //         cout << "Error locking queue not empty mutex"<<endl;
-    //         exit(-1);
-    //     }
-
     //create worker threads
     pthread_t workers[workerCount];
     for(int i=0;i<workerCount;i++){
@@ -193,18 +186,13 @@ void* CommunicationThreadFunct(void* arg){
         file.path=filenames.at(i);
 
         //for every file read we push in queue and signal not empty
-        if(pthread_mutex_lock(&queue_not_empty_lock)){
+        if(pthread_mutex_lock(&cond_mutex)){
             cout << "Error locking queue not empty lock in communication thread"<<endl;
             exit(-1);
         }
 
-        //TODO if full -> wait for not full signal
-        if(pthread_mutex_lock(&queue_not_full_lock)){
-            cout << "Error locking queue not full lock in communication thread"<<endl;
-            exit(-1);
-        }
         while(FileQueue.size()>=QueueSize){
-            pthread_cond_wait(&queue_not_full,&queue_not_full_lock);
+            pthread_cond_wait(&queue_not_full,&cond_mutex);
         }
         
         
@@ -219,8 +207,7 @@ void* CommunicationThreadFunct(void* arg){
         pthread_mutex_unlock(&GeneralQueueLock);    
         
         pthread_cond_broadcast(&queue_not_empty);
-        pthread_mutex_unlock(&queue_not_full_lock);
-        pthread_mutex_unlock(&queue_not_empty_lock);
+        pthread_mutex_unlock(&cond_mutex);
 
 
         
@@ -267,18 +254,14 @@ vector<string> SearchDirectory(string path){
 void* WorkerThreadFunct(void* arg){
     while(true){
         
-        if(pthread_mutex_lock(&queue_not_empty_lock)){
-            cout << "Error locking not full queue mutex"<<endl;
+        if(pthread_mutex_lock(&cond_mutex)){
+            cout << "Error locking not cond mutex"<<endl;
             exit(-1);
         }
 
 
         while(FileQueue.empty()){
-            pthread_cond_wait(&queue_not_empty,&queue_not_empty_lock);
-        }
-        if(pthread_mutex_lock(&queue_not_full_lock)){
-            cout << "Error locking not full queue mutex"<<endl;
-            exit(-1);
+            pthread_cond_wait(&queue_not_empty,&cond_mutex);
         }
         if(pthread_mutex_lock(&GeneralQueueLock)){
             cout << "Error locking General queue mutex"<<endl;
@@ -290,16 +273,13 @@ void* WorkerThreadFunct(void* arg){
         pthread_mutex_unlock(&GeneralQueueLock);
         pthread_cond_broadcast(&queue_not_full);
 
-        pthread_mutex_unlock(&queue_not_full_lock);
-        pthread_mutex_unlock(&queue_not_empty_lock);
+        pthread_mutex_unlock(&cond_mutex);
         
 
 
 
         //lock client mutex
         pthread_mutex_lock(file.client->client_lock);
-        cout << "Locked client with socket " << file.client->sock << endl;
-        cout << "Locked " << file.client->client_lock << endl;
 
         //send file
         sendFile(file.path,file.client->sock);
@@ -311,9 +291,6 @@ void* WorkerThreadFunct(void* arg){
             close(file.client->sock);
         }
         //unlock client mutex
-        cout << "Unlocked client with socket " << file.client->sock << endl;
-        cout << "Unlocked " << file.client->client_lock << endl;
-
         pthread_mutex_unlock(file.client->client_lock);
     }
 }
