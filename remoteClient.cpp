@@ -123,11 +123,9 @@ void createFile(string path , int filesize , int sock){
     cout << "Opened: " << path << endl;
     int total_read=0;
     int nread=0;
-    
     char buf[2];
     while(total_read<filesize){
         nread=read(sock,buf,1);
-        cout << buf << endl;
         total_read = total_read + nread;
         //send blocksize and read exactly that?
         write(file_des,buf,1);
