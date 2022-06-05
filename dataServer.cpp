@@ -320,7 +320,7 @@ void sendFile(string path,int socket){
     strcpy(metadata,(path+" "+to_string(file_size)).c_str());
     
     //maybe while loop here
-    write(socket,metadata,METADATASIZE);
+    cout << "wrote: " << write(socket,metadata,METADATASIZE)<< "should have been " << METADATASIZE<<endl;
 
 
     while(total<file_size){
@@ -331,6 +331,7 @@ void sendFile(string path,int socket){
         }
         //while loop here
         nwrite=write(socket,data.c_str(),blocktotal);
+        cout << data.c_str() << endl;
         data.clear();
         blocktotal = 0;            
     }
