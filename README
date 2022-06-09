@@ -1,0 +1,76 @@
+Anargyros Argyros - sdi1900014
+sysproject2 
+
+====== Compilation/Running ====== 
+
+Use:
+make - to compile project 
+
+make clean - to delete .o , executables AND the output folder
+
+
+There are 2 executables:
+./dataServer -p <port> -s <thread_pool_size> -q <queue_size> -b <block_size>
+
+and
+
+./remoteClient -i <server_ip> -p <server_port> -d <directory>
+
+To terminate the dataServer use Ctrl + C from the terminal.
+
+
+====== Source Code Explanation ======
+
+dataServer.cpp:
+    Source code for the server side of the application, compiles into ./dataServer
+
+    File Objects:
+        File objects contain the path to a file and a pointer to a Client object that requested said file.
+
+    Client Objects:
+        Client objects contain the clients socket fd , a mutex lock to ensure exclusivity on the socket and a counter denoting
+        the how many files the client is still waiting to recieve.
+
+
+    When executed after processing the parameters it initially creates the worker threads and then
+    goes though the process of creating a socket and accepting connections (socket,bind,listen,accept calls) until terminated (ctrl+C).
+    When it accepts a new connection it creates a new Communication thread responsible for assigning the clients requests to Worker threads.
+
+    Communication thread:
+        There is a communication thread for each client.
+        Reads an agreed upon number of bytes from the clients socket which represents the target path the client wants to copy.
+        Then it parses the subtree of the filesystem , detects all files and adds a File object to the queue on condition that it is not full.
+        If the queue is full the thread waits on the queue_not_full condition.
+        If it is able to successfuly add a File into the queue the thread also signals a queue_not_empty condition.
+
+        Note: Accessing the queue and reading from the clients socket is protected using pthread mutexes.The wait on the condition is implemented 
+        very similarly to the Producers/Consumers example from the class notes.
+
+    Worker thread:
+        Since the queue is initially empty all worker threads block on creation since they immediatelly wait on queue_not_empty condition
+        When a worker thread receives a queue_not_empty_signal it pops a File object from the queue , opens corresponding file , calculates its size
+        in bytes using fseek and sends an agreed upon number of bytes through the socket that represent the files path , size in bytes and the servers block size.
+        Immediatelly after , it reads the file and sends filesize number of bytes through the clients socket.
+        If the file that was just send is the clients last file , it also closes the clients socket , effectivelly signaling the client to exit.
+        When a worker thread successfuly processes a file , it also signals the queue_not_full condition so blocked communicaiton threads can keep working.
+
+        All of this is inside an infinite while loop.
+        
+        Note: Accessing the queue and reading from the clients socket is protected using pthread mutexes.The wait on the condition is implemented 
+        very similarly to the Producers/Consumers example from the class notes.
+
+    Notes: Worker and Communication threads immediatelly detach, because we dont intend on joining them anyway.
+
+remoteClient.cpp:
+    Source code for the client side of the application, compiles into ./remoteClient
+
+    When executed , after processing the parameters it , connects with the servers socket (socket,connect calls) and writes an agreen upon number of bytes
+    to it that represent the path of the directory we want to recieve.
+
+    Afterwards it goes on a loop of:
+        -Reading an agreed upon number of bytes which represent the files metadata (path , file size and server block size) from the socket
+        -Creating the neccessary structure in the filesystem to place the files in
+        -Reading filesize bytes from the socket , the files contents, in chunks of block size (There is no actual reason to do this is with the same block size as the server, it would
+        probalbly be "safer" to determine a block size for the client specifically).
+        -Writing those chunks to the target file.
+    until the server closes the remote clients socket and the loop terminates.

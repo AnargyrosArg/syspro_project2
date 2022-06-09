@@ -40,7 +40,7 @@ struct File
 
 void* WorkerThreadFunct(void* arg);
 void* CommunicationThreadFunct(void* arg);
-vector<string> SearchDirectory(string path);
+vector<string> SearchDirectory(string path,int socket);
 void sendFile(string path,int socket);
 
 
@@ -172,9 +172,12 @@ void* CommunicationThreadFunct(void* arg){
     // the thread safe version is deprecated and i dont want to use it
     // so i decided to externally lock directory reading with a mutex
     pthread_mutex_lock(&dir_read);
-    filenames = SearchDirectory(path);
+    filenames = SearchDirectory(path,client->sock);
     pthread_mutex_unlock(&dir_read);
 
+    if(filenames == (vector<string>) NULL){
+        pthread_exit((void*)-1);
+    }
     client->remaining_files = filenames.size();
     
     
@@ -217,7 +220,7 @@ void* CommunicationThreadFunct(void* arg){
 }
 
 
-vector<string> SearchDirectory(string path){
+vector<string> SearchDirectory(string path,int socket){
     DIR *dir;
     dirent * contents;
     vector<string> filenames = vector<string>();
@@ -225,8 +228,8 @@ vector<string> SearchDirectory(string path){
     //open directory
     if((dir = opendir(path.c_str()))==NULL){
         cout << "Couldn't open given directory: " << path <<endl;
-
-        pthread_exit(0);
+        close(socket);
+        return (vector<string>) NULL;
     }  
     //read everything
     while((contents = readdir(dir))!=NULL){
@@ -237,7 +240,7 @@ vector<string> SearchDirectory(string path){
             //if content is itself a directory call this function for it
             if(contents->d_type == DT_DIR){
                 newpath.append("/"+filename);
-                vector<string> temp = SearchDirectory(newpath);
+                vector<string> temp = SearchDirectory(newpath,socket);
               //  filenames.push_back(newpath+"/");
                 filenames.insert(filenames.end() , temp.begin(),temp.end()); 
             }else{
@@ -289,6 +292,8 @@ void* WorkerThreadFunct(void* arg){
         if(file.client->remaining_files==0){
             cout << "Client in socket "<< file.client->sock << " done!"<<endl;
             close(file.client->sock);
+            delete file.client->client_lock;
+            delete file.client;
         }
         //unlock client mutex
         pthread_mutex_unlock(file.client->client_lock);
@@ -305,7 +310,8 @@ void sendFile(string path,int socket){
     
     file_desc = open(path.c_str(),O_RDONLY);
     if(file_desc==-1){
-        perror("fopen: ");
+        perror("open: ");
+        close(socket);
         exit(-1);
     }
     file_size = lseek(file_desc,SEEK_SET,SEEK_END);
@@ -315,20 +321,19 @@ void sendFile(string path,int socket){
     int nread = 0;
     int nwrite;
     int blocktotal = 0;
-    string data ="";
+
     char metadata[METADATASIZE+1];
     strcpy(metadata,(path+" "+to_string(file_size)+" "+to_string(block_size)).c_str());
     char buf[block_size+1];
     write_exactly(socket,metadata,METADATASIZE);
+   // cout << "META: " << metadata <<endl;
     while(total<file_size){
-        while((nread=read(file_desc,buf,block_size-blocktotal))>0){
+        while((nread=read(file_desc,buf+blocktotal,block_size-blocktotal))>0){
             buf[nread]='\0';
             total = total + nread;
             blocktotal= blocktotal + nread;
-            data.append(buf);
         }
-        nwrite=write_exactly(socket,data.c_str(),blocktotal);
-        data.clear();
+        nwrite=write_buffer(socket,buf,blocktotal);
         blocktotal = 0;
     }
     
